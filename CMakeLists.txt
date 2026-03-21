@@ -37,6 +37,7 @@ add_executable(CursorCompensation WIN32
     src/compensation.cpp
     src/hook.cpp
     src/ui.cpp
+    src/debug.cpp
     # ImGui core
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp

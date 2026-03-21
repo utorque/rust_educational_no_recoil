@@ -1,6 +1,9 @@
 #include "hook.h"
 #include "app.h"
 #include "compensation.h"
+#include "debug.h"
+
+#include <string>
 
 HookManager& HookManager::get() {
     static HookManager instance;
@@ -10,12 +13,14 @@ HookManager& HookManager::get() {
 void HookManager::install() {
     if (m_hook) return;
     m_hook = SetWindowsHookExA(WH_MOUSE_LL, hookProc, GetModuleHandleA(nullptr), 0);
+    DLOG("EVENT", "Mouse hook installed");
 }
 
 void HookManager::uninstall() {
     if (!m_hook) return;
     UnhookWindowsHookEx(m_hook);
     m_hook = nullptr;
+    DLOG("EVENT", "Mouse hook uninstalled");
 }
 
 void HookManager::startListening() {
@@ -68,6 +73,7 @@ LRESULT CALLBACK HookManager::hookProc(int nCode, WPARAM wParam, LPARAM lParam) 
 void HookManager::onButtonDown(int button) {
     // ── Listen mode (macro registration) ────────────────────────────────────
     if (m_listening.load()) {
+        DLOG("EVENT", std::string("Button captured for registration: ") + buttonName(button));
         m_listenedButton.store(button);
         m_listened.store(true);
         m_listening.store(false);
@@ -77,19 +83,27 @@ void HookManager::onButtonDown(int button) {
     if (m_pressed[button]) return;   // already tracked as down
     m_pressed[button] = true;
 
+    DLOG("EVENT", std::string("Button DOWN: ") + buttonName(button));
+
     // ── Trigger compensation for every enabled macro on this button ──────────
     for (const auto& macro : App::get().macros()) {
-        if (macro.enabled && macro.trigger_button == button)
+        if (macro.enabled && macro.trigger_button == button) {
+            DLOG("ACTION", "Starting compensation for macro: " + macro.name);
             CompensationEngine::get().start(macro.uuid);
+        }
     }
 }
 
 void HookManager::onButtonUp(int button) {
     m_pressed[button] = false;
 
+    DLOG("EVENT", std::string("Button UP: ") + buttonName(button));
+
     // ── Stop compensation for macros on this button ──────────────────────────
     for (const auto& macro : App::get().macros()) {
-        if (macro.enabled && macro.trigger_button == button)
+        if (macro.enabled && macro.trigger_button == button) {
+            DLOG("ACTION", "Stopping compensation for macro: " + macro.name);
             CompensationEngine::get().stop(macro.uuid);
+        }
     }
 }

@@ -2,6 +2,7 @@
 #include "app.h"
 #include "hook.h"
 #include "compensation.h"
+#include "debug.h"
 #include "imgui.h"
 
 #include <string>
@@ -20,9 +21,14 @@ static std::vector<float> parseFloatCSV(const char* str) {
     std::istringstream ss(str);
     std::string tok;
     while (std::getline(ss, tok, ',')) {
+        // trim whitespace
         auto b = tok.find_first_not_of(" \t\r\n");
         if (b == std::string::npos) continue;
         tok = tok.substr(b, tok.find_last_not_of(" \t\r\n") - b + 1);
+        if (tok.empty()) continue;
+        // strip surrounding quotes  ("-0.510477526" → -0.510477526)
+        if (tok.size() >= 2 && tok.front() == '"' && tok.back() == '"')
+            tok = tok.substr(1, tok.size() - 2);
         if (tok.empty()) continue;
         try { out.push_back(std::stof(tok)); } catch (...) {}
     }
@@ -514,6 +520,98 @@ static void renderSettingsTab() {
     (void)dirty; // suppress unused warning; save is explicit
 }
 
+// ─── Tab: Debug ──────────────────────────────────────────────────────────────
+
+static void renderDebugTab() {
+    DebugLog& dbg = DebugLog::get();
+
+    ImGui::Text("Debug Logging");
+    ImGui::TextDisabled("Captures actions, events and errors in real time.");
+    ImGui::Separator();
+
+    bool en = dbg.enabled.load(std::memory_order_relaxed);
+    if (ImGui::Checkbox("Enable Debug Mode", &en)) {
+        dbg.enabled.store(en, std::memory_order_relaxed);
+        if (en)  dbg.log("INFO", "Debug mode enabled");
+        else     dbg.log("INFO", "Debug mode disabled");
+    }
+    if (en)
+        ImGui::SameLine(),
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.0f, 1.0f), "  LOGGING ACTIVE");
+
+    ImGui::Spacing();
+
+    // Toolbar
+    static char g_exportStatus[128] = {};
+    if (ImGui::Button("Clear##dbg")) {
+        dbg.clear();
+        g_exportStatus[0] = '\0';
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Export  log.txt##dbg")) {
+        std::string path = App::get().appDir() + "\\log.txt";
+        if (dbg.exportToFile(path))
+            snprintf(g_exportStatus, sizeof(g_exportStatus),
+                     "Saved: %s", path.c_str());
+        else
+            snprintf(g_exportStatus, sizeof(g_exportStatus),
+                     "ERROR: could not write %s", path.c_str());
+    }
+    if (g_exportStatus[0]) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", g_exportStatus);
+    }
+
+    ImGui::Spacing();
+
+    // Entry count line
+    size_t cnt = dbg.count();
+    ImGui::TextDisabled("Entries: %zu / 10000", cnt);
+    ImGui::Separator();
+
+    // Log table
+    constexpr ImGuiTableFlags tf =
+        ImGuiTableFlags_Borders    | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_ScrollY    | ImGuiTableFlags_SizingFixedFit;
+
+    if (ImGui::BeginTable("##debuglog", 3, tf, ImVec2(0.0f, -1.0f))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Time",     ImGuiTableColumnFlags_WidthFixed,   85.0f);
+        ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthFixed,   72.0f);
+        ImGui::TableSetupColumn("Message",  ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        auto entries = dbg.snapshot();
+        for (const auto& e : entries) {
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled("%s", e.timestamp.c_str());
+
+            ImGui::TableSetColumnIndex(1);
+            if (e.category == "ERROR")
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", e.category.c_str());
+            else if (e.category == "ACTION")
+                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "%s", e.category.c_str());
+            else if (e.category == "MOVE")
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "%s", e.category.c_str());
+            else if (e.category == "EVENT")
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "%s", e.category.c_str());
+            else
+                ImGui::TextDisabled("%s", e.category.c_str());
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(e.message.c_str());
+        }
+
+        // Auto-scroll to newest entry
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f)
+            ImGui::SetScrollHereY(1.0f);
+
+        ImGui::EndTable();
+    }
+}
+
 // ─── Main window ─────────────────────────────────────────────────────────────
 
 void renderMainWindow() {
@@ -540,6 +638,7 @@ void renderMainWindow() {
         if (ImGui::BeginTabItem("Profiles")) { renderProfilesTab(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Macros"))   { renderMacrosTab();   ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Settings")) { renderSettingsTab(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Debug"))    { renderDebugTab();    ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
 
