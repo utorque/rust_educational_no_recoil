@@ -491,9 +491,11 @@ static void renderSettingsTab() {
     ImGui::Separator();
 
     bool dirty = false;
-    dirty |= ImGui::SliderFloat("Sensitivity", &s.sensitivity, 0.05f, 3.0f, "%.3f");
+    dirty |= ImGui::SliderFloat("Sensitivity", &s.sensitivity, 0.05f, 20.0f, "%.3f");
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Input sensitivity scalar (game setting).");
+        ImGui::SetTooltip("In-game sensitivity value.\n"
+                          "Typical range: 1–10. Low values produce a tiny screenMul\n"
+                          "and will cause no movement — check the computed value below.");
 
     dirty |= ImGui::SliderFloat("FOV", &s.fov, 20.0f, 150.0f, "%.1f");
     if (ImGui::IsItemHovered())

@@ -138,6 +138,26 @@ void CompensationEngine::runLoop(const std::string& macroUUID, std::atomic<bool>
         DLOG("INFO", buf);
     }
 
+    // Sanity-check: estimate the maximum pixel displacement across the whole run.
+    // If it's below 0.5px the accumulator will never round to 1 and nothing moves.
+    {
+        float maxOY = 0.0f;
+        for (int i = 0; i < bullets; ++i)
+            maxOY = std::max(maxOY, std::abs(profile.offset_y[i]));
+        float totalMaxPx = maxOY * std::abs(mag * sm) * (float)bullets;
+        if (totalMaxPx < 0.5f) {
+            char warn[256];
+            float needed = (maxOY > 0.0f)
+                ? 0.5f / (maxOY * std::abs(mag) * (float)bullets)
+                : 0.0f;
+            snprintf(warn, sizeof(warn),
+                "WARNING: max total Y displacement = %.4fpx across %d bullets — "
+                "will never send a move. Increase sensitivity/FOV so |screenMul| >= %.4f",
+                totalMaxPx, bullets, needed);
+            DLOG("ERROR", warn);
+        }
+    }
+
     std::mt19937                          rngEng(std::random_device{}());
     std::uniform_real_distribution<float> dist(-rng_range, rng_range);
 
