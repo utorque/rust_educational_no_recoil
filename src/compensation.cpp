@@ -1,9 +1,12 @@
 #include "compensation.h"
 #include "app.h"
+#include "debug.h"
 
 #include <cmath>
 #include <random>
 #include <chrono>
+#include <string>
+#include <sstream>
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -23,14 +26,25 @@ void CompensationEngine::sendMouseMove(int dx, int dy) {
     in.mi.dx   = dx;
     in.mi.dy   = dy;
     in.mi.dwFlags = MOUSEEVENTF_MOVE;
-    SendInput(1, &in, sizeof(INPUT));
+    UINT sent = SendInput(1, &in, sizeof(INPUT));
+    if (sent == 0) {
+        DLOG("ERROR", "SendInput failed (UIPI block or hook issue)");
+    } else {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "SendInput dx=%d dy=%d", dx, dy);
+        DLOG("MOVE", buf);
+    }
 }
 
 void CompensationEngine::start(const std::string& macroUUID) {
     std::lock_guard<std::mutex> lk(m_mutex);
     auto it = m_runs.find(macroUUID);
-    if (it != m_runs.end() && it->second->running.load()) return;  // already running
+    if (it != m_runs.end() && it->second->running.load()) {
+        DLOG("INFO", "CompensationEngine::start called but already running: " + macroUUID);
+        return;  // already running
+    }
 
+    DLOG("ACTION", "CompensationEngine: thread starting for macro " + macroUUID);
     auto state = std::make_unique<RunState>();
     state->running.store(true);
     std::atomic<bool>* ptr = &state->running;
@@ -44,6 +58,7 @@ void CompensationEngine::stop(const std::string& macroUUID) {
     std::lock_guard<std::mutex> lk(m_mutex);
     auto it = m_runs.find(macroUUID);
     if (it == m_runs.end()) return;
+    DLOG("ACTION", "CompensationEngine: stopping thread for macro " + macroUUID);
     it->second->running.store(false);
     if (it->second->thread.joinable()) it->second->thread.detach();
     m_runs.erase(it);
@@ -71,10 +86,19 @@ void CompensationEngine::runLoop(const std::string& macroUUID, std::atomic<bool>
     GlobalSettings global;
     {
         Macro* m = App::get().findMacro(macroUUID);
-        if (!m) { running->store(false); return; }
+        if (!m) {
+            DLOG("ERROR", "runLoop: macro not found: " + macroUUID);
+            running->store(false); return;
+        }
 
         Profile* p = App::get().findProfile(m->profile_uuid);
-        if (!p || p->bullets == 0) { running->store(false); return; }
+        if (!p || p->bullets == 0) {
+            DLOG("ERROR", "runLoop: profile missing or zero bullets for macro: " + m->name);
+            running->store(false); return;
+        }
+
+        DLOG("ACTION", "runLoop: starting for macro '" + m->name +
+             "' profile '" + p->name + "' bullets=" + std::to_string(p->bullets));
 
         profile      = *p;
         macroSettings = m->settings;
@@ -83,7 +107,10 @@ void CompensationEngine::runLoop(const std::string& macroUUID, std::atomic<bool>
 
     profile.updateBullets();
     int bullets = profile.bullets;
-    if (bullets == 0) { running->store(false); return; }
+    if (bullets == 0) {
+        DLOG("ERROR", "runLoop: bullets=0 after update, aborting");
+        running->store(false); return;
+    }
 
     // ── Pre-compute parameters ────────────────────────────────────────────────
     float sm          = global.screenMultiplier();     // e.g. ≈ −0.028
@@ -92,6 +119,16 @@ void CompensationEngine::runLoop(const std::string& macroUUID, std::atomic<bool>
 
     // ms between each offset step  (60 000 / RPM)
     float stepMs      = 60000.0f / profile.rpm;
+
+    {
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+            "params: screenMul=%.6f  mag=%.2f  rng=%.1f%%  stepMs=%.1f  smooth=%s(%d)",
+            sm, mag, global.randomness_percent, stepMs,
+            macroSettings.use_smoothing ? "on" : "off",
+            macroSettings.smoothing_steps);
+        DLOG("INFO", buf);
+    }
 
     std::mt19937                          rngEng(std::random_device{}());
     std::uniform_real_distribution<float> dist(-rng_range, rng_range);

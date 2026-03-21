@@ -1,4 +1,5 @@
 #include "app.h"
+#include "debug.h"
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
@@ -74,6 +75,7 @@ void App::saveProfile(const Profile& p) {
 void App::addProfile(Profile p) {
     if (p.uuid.empty()) p.uuid = generateUUID();
     p.updateBullets();
+    DLOG("ACTION", "Profile added: '" + p.name + "' bullets=" + std::to_string(p.bullets));
     saveProfile(p);
     m_profiles.push_back(std::move(p));
 }
@@ -83,12 +85,15 @@ void App::updateProfile(const Profile& p) {
         if (ep.uuid != p.uuid) continue;
         ep = p;
         ep.updateBullets();
+        DLOG("ACTION", "Profile updated: '" + ep.name + "' bullets=" + std::to_string(ep.bullets));
         saveProfile(ep);
         return;
     }
 }
 
 void App::deleteProfile(const std::string& uuid) {
+    for (const auto& p : m_profiles)
+        if (p.uuid == uuid) { DLOG("ACTION", "Profile deleted: '" + p.name + "'"); break; }
     m_profiles.erase(
         std::remove_if(m_profiles.begin(), m_profiles.end(),
             [&](const Profile& p) { return p.uuid == uuid; }),
@@ -126,6 +131,7 @@ void App::saveMacro(const Macro& m) {
 
 void App::addMacro(Macro m) {
     if (m.uuid.empty()) m.uuid = generateUUID();
+    DLOG("ACTION", "Macro added: '" + m.name + "' button=" + std::to_string(m.trigger_button));
     saveMacro(m);
     m_macros.push_back(std::move(m));
 }
@@ -134,12 +140,15 @@ void App::updateMacro(const Macro& m) {
     for (auto& em : m_macros) {
         if (em.uuid != m.uuid) continue;
         em = m;
+        DLOG("ACTION", "Macro updated: '" + em.name + "'");
         saveMacro(em);
         return;
     }
 }
 
 void App::deleteMacro(const std::string& uuid) {
+    for (const auto& m : m_macros)
+        if (m.uuid == uuid) { DLOG("ACTION", "Macro deleted: '" + m.name + "'"); break; }
     m_macros.erase(
         std::remove_if(m_macros.begin(), m_macros.end(),
             [&](const Macro& m) { return m.uuid == uuid; }),
@@ -157,6 +166,7 @@ void App::toggleMacro(const std::string& uuid) {
     for (auto& m : m_macros) {
         if (m.uuid != uuid) continue;
         m.enabled = !m.enabled;
+        DLOG("ACTION", std::string("Macro '") + m.name + "' " + (m.enabled ? "enabled" : "disabled"));
         saveMacro(m);
         return;
     }
